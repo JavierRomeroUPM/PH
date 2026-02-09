@@ -27,10 +27,10 @@ except Exception as e:
     assets_loaded = False
 
 # 4. Interfaz de Usuario
-st.title("🚀 Predictor de Ph - Kriging Metamodel (GPR)")
-st.subheader("Simulador de Alta Fidelidad para Tesis Doctoral")
+st.title("Predictor de Ph - Kriging Metamodel (GPR)")
+st.subheader("Simulador para Tesis Doctoral")
 st.markdown("""
-Esta versión utiliza **Gaussian Process Regression**, permitiendo una **interpolación continua** y precisa 
+Esta versión utiliza **Gaussian Process Regression**, permitiendo una **interpolación continua** y  
 entre los escenarios simulados en FLAC.
 """)
 
@@ -41,16 +41,16 @@ with st.form("my_form"):
     with col1:
         st.subheader("🧪 Variables Analíticas")
         ucs_val = st.number_input("UCS - Resistencia Compresión Simple (MPa)", 
-                                   min_value=5.0, max_value=100.0, value=35.0, step=0.5, format="%.1f")
+                                   min_value=5.0, max_value=100.0, value=5.0, step=0.5, format="%.1f")
         gsi_val = st.number_input("GSI - Geological Strength Index", 
-                                   min_value=10, max_value=85, value=40, step=1)
+                                   min_value=10, max_value=85, value=10, step=1)
         mo_val = st.number_input("Parámetro mo", 
-                                  min_value=5.0, max_value=32.0, value=7.0, step=0.1, format="%.1f")
+                                  min_value=5.0, max_value=32.0, value=5.0, step=0.1, format="%.1f")
         
     with col2:
         st.subheader("⚙️ Variables No Analíticas")
         b_val = st.number_input("Ancho de cimentación - B (m)", 
-                                 min_value=4.5, max_value=22.0, value=5.0, step=0.1, format="%.2f")
+                                 min_value=4.5, max_value=22.0, value=4.5, step=0.1, format="%.2f")
         v5_sel = st.selectbox("Peso Propio", ["Sin Peso", "Con Peso"], index=1)
         v6_sel = st.selectbox("Dilatancia", ["Nulo", "Asociada"], index=0)
         v7_sel = st.selectbox("Forma del modelo", ["Plana", "Axisimétrica"], index=0)
