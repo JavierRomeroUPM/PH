@@ -39,7 +39,7 @@ with st.form("my_form"):
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("🧪 Variables Analíticas")
+        st.subheader("Variables Analíticas")
         ucs_val = st.number_input("UCS - Resistencia Compresión Simple (MPa)", 
                                    min_value=5.0, max_value=100.0, value=5.0, step=0.5, format="%.1f")
         gsi_val = st.number_input("GSI - Geological Strength Index", 
@@ -48,7 +48,7 @@ with st.form("my_form"):
                                   min_value=5.0, max_value=32.0, value=5.0, step=0.1, format="%.1f")
         
     with col2:
-        st.subheader("⚙️ Variables No Analíticas")
+        st.subheader("Variables No Analíticas")
         b_val = st.number_input("Ancho de cimentación - B (m)", 
                                  min_value=4.5, max_value=22.0, value=4.5, step=0.1, format="%.2f")
         v5_sel = st.selectbox("Peso Propio", ["Sin Peso", "Con Peso"], index=1)
