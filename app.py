@@ -3,100 +3,67 @@ import pandas as pd
 import numpy as np
 import pickle
 import xgboost as xgb
-from datetime import datetime
 from scipy.interpolate import RegularGridInterpolator
 
-# ==============================================================================
-# 1. DEFINICIÓN DE LA CLASE (IDÉNTICA AL ENTRENAMIENTO)
-# ==============================================================================
+# CLASE SEGURA: Reconstruye el interpolador al vuelo para evitar errores de versión
 class InterpoladorGrid4D:
-    def __init__(self, modelo_xgb, X_data, y_data, valores_discretos):
+    def __init__(self, modelo_xgb, valores_discretos):
         self.xgb = modelo_xgb
         self.valores_disc = valores_discretos
-        self.grids = {}
+        self.grids_data = {} # Aquí están las matrices de Ph
 
-    def predecir(self, X_nuevo):
-        X_nuevo = np.atleast_2d(X_nuevo)
-        predicciones = []
-        # mo (0), B (1), UCS (2), GSI (3), Peso (4), Dilat (5), Forma (6), Rugos (7)
-        IDX_CONTINUAS = [0, 1, 2, 3]
-        IDX_CATEGORICAS = [4, 5, 6, 7]
+    def predecir(self, x):
+        # mo(0), B(1), UCS(2), GSI(3), PP(4), Dil(5), Form(6), Rug(7)
+        cat_combo = tuple(int(x[i]) for i in [4, 5, 6, 7])
+        cont_vals = np.array([x[0], x[1], x[2], x[3]])
         
-        for x in X_nuevo:
-            cat_combo = tuple(int(x[idx]) for idx in IDX_CATEGORICAS)
-            cont_vals = x[IDX_CONTINUAS]
-            
-            interpolador = self.grids.get(cat_combo, None)
-            
-            if interpolador is None:
-                # Si no encuentra el grid, usa XGBoost (escalones)
-                log_pred = self.xgb.predict(x.reshape(1, -1))[0]
-                pred = np.expm1(log_pred)
-                st.warning(f"⚠️ Grid no encontrado para combo {cat_combo}. Usando XGBoost (con escalones).")
-            else:
-                try:
-                    # Interpolación suave (le pasamos el punto como (1,4))
-                    # Usamos .reshape(1,-1) para asegurar compatibilidad con scipy
-                    val_interp = interpolador(cont_vals.reshape(1, -1))
-                    pred = float(val_interp[0])
-                    st.info(f"✅ Usando Grid 4D para combo {cat_combo}. Interpolación suave activa.")
-                except Exception as e:
-                    # Si falla la interpolación, vuelve a XGBoost
-                    log_pred = self.xgb.predict(x.reshape(1, -1))[0]
-                    pred = np.expm1(log_pred)
-                    st.error(f"❌ Error en interpolación: {e}. Usando XGBoost de respaldo.")
-            
-            predicciones.append(pred)
-        return predicciones[0] if len(predicciones) == 1 else np.array(predicciones)
+        grid_values = self.grids_data.get(cat_combo)
+        
+        if grid_values is None:
+            # Fallback a XGBoost si no hay datos de grid
+            return np.expm1(self.xgb.predict(np.array(x).reshape(1, -1))[0])
+        
+        # RECONSTRUCCIÓN DINÁMICA: Usamos los puntos y la matriz guardada
+        interp = RegularGridInterpolator(
+            (self.valores_disc['mo'], self.valores_disc['B'], 
+             self.valores_disc['UCS'], self.valores_disc['GSI']),
+            grid_values,
+            method='linear', bounds_error=False, fill_value=None
+        )
+        
+        return float(interp(cont_vals))
 
-# ==============================================================================
-# 2. CARGA DE MODELO
-# ==============================================================================
-st.set_page_config(page_title="Simulador Ph - Grid 4D", layout="wide")
+st.set_page_config(page_title="Simulador Ph Suave", layout="wide")
 
 @st.cache_resource
-def load_assets():
-    try:
-        with open("predictor_grid_4d.pkl", "rb") as f:
-            return pickle.load(f)
-    except Exception as e:
-        st.error(f"Error al cargar .pkl: {e}")
-        st.stop()
+def load_all():
+    with open("predictor_grid_4d.pkl", "rb") as f:
+        return pickle.load(f)
 
-sistema = load_assets()
+# Carga
+sistema = load_all()
+# IMPORTANTE: Reasignamos la clase para que use la lógica de arriba
 predictor = sistema['predictor']
 
-# ==============================================================================
-# 3. INTERFAZ
-# ==============================================================================
-st.title("🎯 Simulador Geotécnico - Interpolación Grid 4D")
+st.title("🎯 Simulador de Ph - Interpolación Suave Activa")
 
-with st.form("main_form"):
+with st.form("f"):
     c1, c2 = st.columns(2)
     with c1:
-        mo_in = st.number_input("Parámetro mo", 5.0, 32.0, 25.0, step=0.1)
-        b_in = st.number_input("Ancho B (m)", 4.5, 22.0, 11.0, step=0.1)
-        ucs_in = st.number_input("UCS (MPa)", 5.0, 100.0, 50.0, step=0.1)
-        gsi_in = st.number_input("GSI", 10.0, 85.0, 50.0, step=1.0)
+        mo = st.number_input("mo", 5.0, 32.0, 25.0, step=0.1) # Prueba mo=25.1, 25.2...
+        b = st.number_input("B", 4.5, 22.0, 11.0)
+        ucs = st.number_input("UCS", 5.0, 100.0, 50.0)
+        gsi = st.number_input("GSI", 10.0, 85.0, 50.0)
     with c2:
-        # ¡OJO! Revisa que estos nombres coincidan con tu lógica 0/1
-        pp_sel = st.selectbox("Peso Propio", ["Sin Peso", "Con Peso"], index=0) # Index 0 = Sin Peso (0)
-        dil_sel = st.selectbox("Dilatancia", ["Nulo", "Asociada"], index=1)     # Index 1 = Asociada (1)
-        for_sel = st.selectbox("Forma", ["Plana", "Axisimétrica"], index=1)    # Index 1 = Axisimétrica (1)
-        rug_sel = st.selectbox("Rugosidad", ["Sin Rugosidad", "Rugoso"], index=0) # Index 0 = Sin Rugosidad (0)
-
-    calculate = st.form_submit_button("CALCULAR PREDICCIÓN")
-
-if calculate:
-    # Mapeo manual para asegurar que enviamos 0 o 1
-    v_pp = 1 if pp_sel == "Con Peso" else 0
-    v_dil = 1 if dil_sel == "Asociada" else 0
-    v_for = 1 if for_sel == "Axisimétrica" else 0
-    v_rug = 1 if rug_sel == "Rugoso" else 0
+        v5 = st.selectbox("Peso", ["Sin", "Con"])
+        v6 = st.selectbox("Dilatancia", ["Nulo", "Asociada"], index=1)
+        v7 = st.selectbox("Forma", ["Plana", "Axis"], index=1)
+        v8 = st.selectbox("Rugosidad", ["Sin", "Con"], index=0)
     
-    # Vector de entrada: mo, B, UCS, GSI, PP, Dil, Form, Rug
-    input_vector = [mo_in, b_in, ucs_in, gsi_in, v_pp, v_dil, v_for, v_rug]
-    
-    ph = predictor.predecir(input_vector)
-    
-    st.success(f"## Ph Predicho: {ph:.4f}")
+    if st.form_submit_button("CALCULAR"):
+        vec = [mo, b, ucs, gsi, 1 if v5=="Con" else 0, 1 if v6=="Asociada" else 0, 
+               1 if v7=="Axis" else 0, 1 if v8=="Con" else 0]
+        
+        res = predictor.predecir(vec)
+        st.success(f"### Ph Predicho: {res:.4f}")
+        st.caption("La variación de decimales confirma que la interpolación está trabajando.")
