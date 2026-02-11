@@ -16,10 +16,8 @@ class InterpoladorGrid4D:
         self.grids_data = {} 
 
     def predecir(self, x):
-        # mo(0), B(1), UCS(2), GSI(3), Peso(4), Dil(5), Form(6), Rug(7)
         cat_combo = tuple(int(x[i]) for i in [4, 5, 6, 7])
         cont_vals = np.array([x[0], x[1], x[2], x[3]])
-        
         grid_values = self.grids_data.get(cat_combo)
         
         if grid_values is None:
@@ -30,10 +28,7 @@ class InterpoladorGrid4D:
             interp = RegularGridInterpolator(
                 (self.valores_disc['mo'], self.valores_disc['B'], 
                  self.valores_disc['UCS'], self.valores_disc['GSI']),
-                grid_values, 
-                method='linear', 
-                bounds_error=False, 
-                fill_value=None
+                grid_values, method='linear', bounds_error=False, fill_value=None
             )
             punto_a_interpolar = cont_vals.reshape(1, -1)
             resultado = interp(punto_a_interpolar)
@@ -43,11 +38,10 @@ class InterpoladorGrid4D:
             return np.expm1(log_pred)
 
 # ==============================================================================
-# 2. CONFIGURACIÓN DE PÁGINA Y CARGA DE ACTIVOS
+# 2. CONFIGURACIÓN Y CARGA
 # ==============================================================================
 st.set_page_config(page_title="Simulador Ph Suave - Doctorado", layout="wide")
 
-# Inicialización del historial en la sesión
 if "historial" not in st.session_state:
     st.session_state["historial"] = []
 
@@ -67,76 +61,79 @@ valores_discretos = assets['valores_discretos']
 # ==============================================================================
 # 3. INTERFAZ DE USUARIO
 # ==============================================================================
-st.title("🚀 Predictor Ph - Metamodelo con Historial")
-st.markdown("Este simulador permite interpolación suave y guarda un registro de tus consultas.")
+st.title("🚀 Predictor Ph - Metamodelo de Alta Fidelidad")
+st.markdown("Sistema híbrido **XGBoost + Grid 4D** para la eliminación del efecto escalón.")
 
 with st.form("main_form"):
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("🧪 Variables Analíticas")
-        mo = st.number_input("Parámetro mo", 5.0, 32.0, 25.0, step=0.1)
-        b = st.number_input("Ancho B (m)", 4.5, 22.0, 11.0, step=0.1)
         ucs = st.number_input("UCS (MPa)", 5.0, 100.0, 50.0, step=0.1)
         gsi = st.number_input("GSI", 10.0, 85.0, 50.0, step=0.1)
+        mo = st.number_input("Parámetro mo", 5.0, 32.0, 20.0, step=0.1)
         
     with col2:
-        st.subheader("⚙️ Variables de Simulación")
+        st.subheader("⚙️ Variables No Analíticas")
+        b = st.number_input("Ancho B (m)", 4.5, 22.0, 11.0, step=0.1)
         v_pp = st.selectbox("Peso Propio", ["Sin Peso", "Con Peso"])
         v_dil = st.selectbox("Dilatancia", ["Nulo", "Asociada"], index=1)
         v_for = st.selectbox("Forma", ["Plana", "Axisimétrica"], index=1)
         v_rug = st.selectbox("Rugosidad", ["Sin Rugosidad", "Rugoso"], index=0)
 
-    submit = st.form_submit_button("CALCULAR PH", use_container_width=True)
+    submit = st.form_submit_button("🎯 CALCULAR PREDICCIÓN", use_container_width=True)
 
 if submit:
-    # Mapeo a 0/1
+    # Mapeo a formato numérico
     pp_val = 1 if v_pp == "Con Peso" else 0
     dil_val = 1 if v_dil == "Asociada" else 0
     for_val = 1 if v_for == "Axisimétrica" else 0
     rug_val = 1 if v_rug == "Rugoso" else 0
     
+    # Vector: mo, B, UCS, GSI, PP, Dil, Form, Rug
     vec = [mo, b, ucs, gsi, pp_val, dil_val, for_val, rug_val]
     ph_resultado = predictor.predecir(vec)
     
-    st.success(f"### Ph Predicho: **{ph_resultado:.4f} MPa**")
+    # DETECCIÓN DE MODO (Interpolado vs Exacto)
+    # Comprobamos si las 4 variables continuas están en los arrays originales del grid
+    es_exacto = (mo in valores_discretos['mo'] and 
+                 b in valores_discretos['B'] and 
+                 ucs in valores_discretos['UCS'] and 
+                 gsi in valores_discretos['GSI'])
+    
+    st.markdown("---")
+    res_col1, res_col2 = st.columns([2, 1])
+    
+    with res_col1:
+        st.success(f"### Ph Predicho: **{ph_resultado:.4f} MPa**")
+    
+    with res_col2:
+        if es_exacto:
+            st.info("🎯 **MODO: PURO**\n\nCoincide con un punto de simulación.")
+        else:
+            st.warning("🔄 **MODO: INTERPOLADO**\n\nCálculo suave entre nodos.")
 
-    # GUARDAR EN EL HISTORIAL
+    # Guardar en historial
     nuevo_registro = {
-        "Fecha/Hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "mo": mo, "B (m)": b, "UCS": ucs, "GSI": gsi,
-        "Peso": v_pp, "Dilat.": v_dil, "Forma": v_for, "Rugos.": v_rug,
+        "Fecha/Hora": datetime.now().strftime("%H:%M:%S"),
+        "mo": mo, "B": b, "UCS": ucs, "GSI": gsi,
+        "Modo": "Puro" if es_exacto else "Interpolado",
         "Ph (MPa)": round(ph_resultado, 4)
     }
     st.session_state["historial"].insert(0, nuevo_registro)
 
 # ==============================================================================
-# 4. SECCIÓN DE HISTORIAL
+# 4. HISTORIAL
 # ==============================================================================
 if st.session_state["historial"]:
     st.markdown("---")
     st.subheader("📜 Historial de Predicciones")
-    
     df_hist = pd.DataFrame(st.session_state["historial"])
     st.dataframe(df_hist, use_container_width=True)
     
-    col_h1, col_h2 = st.columns([1, 4])
-    
-    with col_h1:
-        # Botón para descargar CSV
-        csv = df_hist.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Descargar CSV",
-            data=csv,
-            file_name=f"historial_ph_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-        )
-    
-    with col_h2:
-        # Botón para limpiar historial
-        if st.button("🗑️ Borrar Historial"):
-            st.session_state["historial"] = []
-            st.rerun()
+    if st.button("🗑️ Borrar Historial"):
+        st.session_state["historial"] = []
+        st.rerun()
 
 st.markdown("---")
-st.caption("Modelo: Interpolador Grid 4D | Python 3.11")
+st.caption(f"Modelo: XGBoost + Interpolador Grid 4D | Python 3.11 | SciPy RegularGridInterpolator")
