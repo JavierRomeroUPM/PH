@@ -5,10 +5,9 @@ import pickle
 import xgboost as xgb
 from datetime import datetime
 from scipy.interpolate import RegularGridInterpolator
-from collections import defaultdict
 
 # ==============================================================================
-# 1. DEFINICIÓN DE LA CLASE (DEBE SER IDÉNTICA A TU SCRIPT GENERADOR)
+# 1. DEFINICIÓN DE LA CLASE (IDÉNTICA AL ENTRENAMIENTO)
 # ==============================================================================
 class InterpoladorGrid4D:
     def __init__(self, modelo_xgb, X_data, y_data, valores_discretos):
@@ -17,110 +16,87 @@ class InterpoladorGrid4D:
         self.grids = {}
 
     def predecir(self, X_nuevo):
-        if isinstance(X_nuevo, list):
-            X_nuevo = np.array(X_nuevo)
-        
-        es_escalar = False
-        if X_nuevo.ndim == 1:
-            X_nuevo = X_nuevo.reshape(1, -1)
-            es_escalar = True
-        
+        X_nuevo = np.atleast_2d(X_nuevo)
         predicciones = []
-        IDX_CONTINUAS = [0, 1, 2, 3]  # mo, B, UCS, GSI
-        IDX_CATEGORICAS = [4, 5, 6, 7] # PP, Dil, Form, Rug
-
-        for i in range(len(X_nuevo)):
-            x = X_nuevo[i]
+        # mo (0), B (1), UCS (2), GSI (3), Peso (4), Dilat (5), Forma (6), Rugos (7)
+        IDX_CONTINUAS = [0, 1, 2, 3]
+        IDX_CATEGORICAS = [4, 5, 6, 7]
+        
+        for x in X_nuevo:
             cat_combo = tuple(int(x[idx]) for idx in IDX_CATEGORICAS)
             cont_vals = x[IDX_CONTINUAS]
             
             interpolador = self.grids.get(cat_combo, None)
             
             if interpolador is None:
-                # Fallback a XGBoost puro (escala log -> real)
-                pred = np.expm1(self.xgb.predict(x.reshape(1, -1)))[0]
+                # Si no encuentra el grid, usa XGBoost (escalones)
+                log_pred = self.xgb.predict(x.reshape(1, -1))[0]
+                pred = np.expm1(log_pred)
+                st.warning(f"⚠️ Grid no encontrado para combo {cat_combo}. Usando XGBoost (con escalones).")
             else:
                 try:
-                    # Interpolación n-lineal suave
-                    pred = float(interpolador(cont_vals))
-                    # Validación de seguridad
-                    if np.isnan(pred) or np.isinf(pred) or pred < 0:
-                        pred = np.expm1(self.xgb.predict(x.reshape(1, -1)))[0]
-                except:
-                    pred = np.expm1(self.xgb.predict(x.reshape(1, -1)))[0]
+                    # Interpolación suave (le pasamos el punto como (1,4))
+                    # Usamos .reshape(1,-1) para asegurar compatibilidad con scipy
+                    val_interp = interpolador(cont_vals.reshape(1, -1))
+                    pred = float(val_interp[0])
+                    st.info(f"✅ Usando Grid 4D para combo {cat_combo}. Interpolación suave activa.")
+                except Exception as e:
+                    # Si falla la interpolación, vuelve a XGBoost
+                    log_pred = self.xgb.predict(x.reshape(1, -1))[0]
+                    pred = np.expm1(log_pred)
+                    st.error(f"❌ Error en interpolación: {e}. Usando XGBoost de respaldo.")
             
             predicciones.append(pred)
-        
-        return predicciones[0] if es_escalar else np.array(predicciones)
+        return predicciones[0] if len(predicciones) == 1 else np.array(predicciones)
 
 # ==============================================================================
-# 2. CONFIGURACIÓN Y CARGA DE ACTIVOS
+# 2. CARGA DE MODELO
 # ==============================================================================
-st.set_page_config(page_title="Predictor Ph - Grid 4D", layout="wide")
+st.set_page_config(page_title="Simulador Ph - Grid 4D", layout="wide")
 
 @st.cache_resource
 def load_assets():
     try:
         with open("predictor_grid_4d.pkl", "rb") as f:
-            # Pickle reconstruye la clase usando la definición de arriba
-            sistema = pickle.load(f)
-        return sistema
+            return pickle.load(f)
     except Exception as e:
-        st.error(f"❌ Error crítico: No se pudo cargar el archivo pkl. {e}")
+        st.error(f"Error al cargar .pkl: {e}")
         st.stop()
 
 sistema = load_assets()
 predictor = sistema['predictor']
-metricas = sistema['metricas']
-valores_discretos = sistema['valores_discretos']
 
 # ==============================================================================
-# 3. INTERFAZ DE USUARIO
+# 3. INTERFAZ
 # ==============================================================================
-st.title("🚀 Predictor de Ph - XGBoost + Grid 4D")
-st.markdown(f"**MAPE del sistema:** {metricas['grid']['mape']:.2f}% | **Interpolación:** Suave N-Lineal")
+st.title("🎯 Simulador Geotécnico - Interpolación Grid 4D")
 
-with st.form("input_form"):
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🧪 Variables Analíticas")
-        mo = st.number_input("Parámetro mo", 5.0, 32.0, 20.0, help="Rango: 5 - 32")
-        b = st.number_input("Ancho B (m)", 4.5, 22.0, 11.0, help="Rango: 4.5 - 22")
-        ucs = st.number_input("UCS (MPa)", 5.0, 100.0, 50.0, help="Rango: 5 - 100")
-        gsi = st.number_input("GSI", 10.0, 85.0, 50.0, help="Rango: 10 - 85")
-        
-    with col2:
-        st.subheader("⚙️ Variables No Analíticas")
-        v_pp = st.selectbox("Peso Propio", ["Sin Peso", "Con Peso"])
-        v_dil = st.selectbox("Dilatancia", ["Nulo", "Asociada"], index=1)
-        v_for = st.selectbox("Forma", ["Plana", "Axisimétrica"], index=1)
-        v_rug = st.selectbox("Rugosidad", ["Sin Rugosidad", "Rugoso"], index=1)
-    
-    submit = st.form_submit_button("🎯 CALCULAR PH", use_container_width=True)
+with st.form("main_form"):
+    c1, c2 = st.columns(2)
+    with c1:
+        mo_in = st.number_input("Parámetro mo", 5.0, 32.0, 25.0, step=0.1)
+        b_in = st.number_input("Ancho B (m)", 4.5, 22.0, 11.0, step=0.1)
+        ucs_in = st.number_input("UCS (MPa)", 5.0, 100.0, 50.0, step=0.1)
+        gsi_in = st.number_input("GSI", 10.0, 85.0, 50.0, step=1.0)
+    with c2:
+        # ¡OJO! Revisa que estos nombres coincidan con tu lógica 0/1
+        pp_sel = st.selectbox("Peso Propio", ["Sin Peso", "Con Peso"], index=0) # Index 0 = Sin Peso (0)
+        dil_sel = st.selectbox("Dilatancia", ["Nulo", "Asociada"], index=1)     # Index 1 = Asociada (1)
+        for_sel = st.selectbox("Forma", ["Plana", "Axisimétrica"], index=1)    # Index 1 = Axisimétrica (1)
+        rug_sel = st.selectbox("Rugosidad", ["Sin Rugosidad", "Rugoso"], index=0) # Index 0 = Sin Rugosidad (0)
 
-if submit:
-    # Mapeo idéntico al entrenamiento
-    c_pp = 1 if v_pp == "Con Peso" else 0
-    c_dil = 1 if v_dil == "Asociada" else 0
-    c_for = 1 if v_for == "Axisimétrica" else 0
-    c_rug = 1 if v_rug == "Rugoso" else 0
-    
-    # Vector: mo, B, UCS, GSI, PP, Dil, Form, Rug
-    vector = [mo, b, ucs, gsi, c_pp, c_dil, c_for, c_rug]
-    
-    ph_pred = predictor.predecir(vector)
-    
-    st.markdown("---")
-    st.success(f"### Ph Predicho: **{ph_pred:.4f}**")
-    
-    # Comprobar si es punto exacto o interpolado
-    esta_en_grid = (mo in valores_discretos['mo'] and b in valores_discretos['B'] and 
-                    ucs in valores_discretos['UCS'] and gsi in valores_discretos['GSI'])
-    
-    if esta_en_grid:
-        st.caption("📍 El punto coincide exactamente con los valores discretos de entrenamiento.")
-    else:
-        st.caption("🔄 El resultado es una interpolación lineal entre los nodos del hipercubo 4D.")
+    calculate = st.form_submit_button("CALCULAR PREDICCIÓN")
 
-# (Opcional: puedes añadir aquí el bloque del historial que tenías antes)
+if calculate:
+    # Mapeo manual para asegurar que enviamos 0 o 1
+    v_pp = 1 if pp_sel == "Con Peso" else 0
+    v_dil = 1 if dil_sel == "Asociada" else 0
+    v_for = 1 if for_sel == "Axisimétrica" else 0
+    v_rug = 1 if rug_sel == "Rugoso" else 0
+    
+    # Vector de entrada: mo, B, UCS, GSI, PP, Dil, Form, Rug
+    input_vector = [mo_in, b_in, ucs_in, gsi_in, v_pp, v_dil, v_for, v_rug]
+    
+    ph = predictor.predecir(input_vector)
+    
+    st.success(f"## Ph Predicho: {ph:.4f}")
