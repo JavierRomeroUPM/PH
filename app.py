@@ -16,6 +16,7 @@ class InterpoladorGrid4D:
         self.grids_data = {} 
 
     def predecir(self, x):
+        # Índices: mo(0), B(1), UCS(2), GSI(3), Peso(4), Dilat(5), Forma(6), Rugos(7)
         cat_combo = tuple(int(x[i]) for i in [4, 5, 6, 7])
         cont_vals = np.array([x[0], x[1], x[2], x[3]])
         grid_values = self.grids_data.get(cat_combo)
@@ -62,7 +63,7 @@ valores_discretos = assets['valores_discretos']
 # 3. INTERFAZ DE USUARIO
 # ==============================================================================
 st.title("🚀 Predictor Ph - Metamodelo de Alta Fidelidad")
-st.markdown("Sistema híbrido **XGBoost + Grid 4D** para la eliminación del efecto escalón.")
+st.markdown("Sistema de interpolación n-lineal para la obtención de superficies de respuesta continuas.")
 
 with st.form("main_form"):
     col1, col2 = st.columns(2)
@@ -94,8 +95,7 @@ if submit:
     vec = [mo, b, ucs, gsi, pp_val, dil_val, for_val, rug_val]
     ph_resultado = predictor.predecir(vec)
     
-    # DETECCIÓN DE MODO (Interpolado vs Exacto)
-    # Comprobamos si las 4 variables continuas están en los arrays originales del grid
+    # Detección visual de modo (Solo para el mensaje, no para el historial)
     es_exacto = (mo in valores_discretos['mo'] and 
                  b in valores_discretos['B'] and 
                  ucs in valores_discretos['UCS'] and 
@@ -109,31 +109,30 @@ if submit:
     
     with res_col2:
         if es_exacto:
-            st.info("🎯 **MODO: PURO**\n\nCoincide con un punto de simulación.")
+            st.info("🎯 **MODO: PURO**\n\nCoincidencia con nodo de malla.")
         else:
-            st.warning("🔄 **MODO: INTERPOLADO**\n\nCálculo suave entre nodos.")
+            st.warning("🔄 **MODO: INTERPOLADO**\n\nTransición suave calculada.")
 
-    # Guardar en historial
+    # Guardar en historial (Solo variables y resultado)
     nuevo_registro = {
-        "Fecha/Hora": datetime.now().strftime("%H:%M:%S"),
-        "mo": mo, "B": b, "UCS": ucs, "GSI": gsi,
-        "Modo": "Puro" if es_exacto else "Interpolado",
+        "UCS": ucs, "GSI": gsi, "mo": mo, "B (m)": b,
+        "Peso": v_pp, "Dilat.": v_dil, "Forma": v_for, "Rugos.": v_rug,
         "Ph (MPa)": round(ph_resultado, 4)
     }
     st.session_state["historial"].insert(0, nuevo_registro)
 
 # ==============================================================================
-# 4. HISTORIAL
+# 4. HISTORIAL TÉCNICO
 # ==============================================================================
 if st.session_state["historial"]:
     st.markdown("---")
-    st.subheader("📜 Historial de Predicciones")
+    st.subheader("📜 Historial de Resultados")
     df_hist = pd.DataFrame(st.session_state["historial"])
-    st.dataframe(df_hist, use_container_width=True)
+    st.dataframe(df_hist, use_container_width=True, hide_index=True)
     
     if st.button("🗑️ Borrar Historial"):
         st.session_state["historial"] = []
         st.rerun()
 
 st.markdown("---")
-st.caption(f"Modelo: XGBoost + Interpolador Grid 4D | Python 3.11 | SciPy RegularGridInterpolator")
+st.caption(f"Metamodelo Híbrido XGBoost-Grid4D | Doctorado | SciPy Multilinear Interpolation")
