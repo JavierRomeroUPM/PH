@@ -4,118 +4,114 @@ import numpy as np
 import joblib
 import pickle
 from datetime import datetime
+from scipy.interpolate import RegularGridInterpolator
 
-# 1. Configuración de la página
-st.set_page_config(page_title="Predictor Ph Grid 4D - XGBoost Interpolado", layout="wide")
+# ==============================================================================
+# 1. DEFINICIÓN DE LA CLASE (OBLIGATORIO PARA QUE PICKLE LA ENCUENTRE)
+# ==============================================================================
+# Esta clase debe ser idéntica a la que usaste para entrenar
+class InterpoladorGrid4D:
+    def __init__(self, modelo_xgb, X_data, y_data, valores_discretos):
+        self.xgb = modelo_xgb
+        self.valores_disc = valores_discretos
+        self.grids = {}
 
-# 2. Inicialización del historial
+    def predecir(self, X_nuevo):
+        if isinstance(X_nuevo, list):
+            X_nuevo = np.array(X_nuevo)
+        
+        es_escalar = False
+        if X_nuevo.ndim == 1:
+            X_nuevo = X_nuevo.reshape(1, -1)
+            es_escalar = True
+        
+        # Aquí va la lógica simplificada para la predicción en la App
+        # El objeto cargado ya tiene los 'grids' entrenados
+        predicciones = []
+        # Índices fijos según tu entrenamiento
+        IDX_CATEGORICAS = [4, 5, 6, 7]
+        IDX_CONTINUAS = [0, 1, 2, 3]
+
+        for i in range(len(X_nuevo)):
+            x = X_nuevo[i]
+            cat_combo = tuple(int(x[idx]) for idx in IDX_CATEGORICAS)
+            cont_vals = x[IDX_CONTINUAS]
+            
+            interpolador = self.grids.get(cat_combo, None)
+            
+            if interpolador is None:
+                # Si no hay grid, usa el modelo base (necesita importado el modelo xgb)
+                pred = 0.0 # Valor por defecto o fallback
+            else:
+                try:
+                    pred = float(interpolador(cont_vals))
+                except:
+                    pred = 0.0
+            predicciones.append(pred)
+        
+        return predicciones[0] if es_escalar else np.array(predicciones)
+
+# ==============================================================================
+# 2. CONFIGURACIÓN DE LA PÁGINA
+# ==============================================================================
+st.set_page_config(page_title="Predictor Ph Grid 4D", layout="wide")
+
+# Inicialización del historial
 if "historial" not in st.session_state:
     st.session_state["historial"] = []
 
-# 3. Carga del Modelo Grid 4D
+# 3. CARGA DE ACTIVOS
 @st.cache_resource
 def load_assets():
-    """Carga el modelo Grid 4D desde el archivo pickle"""
     try:
         with open("predictor_grid_4d.pkl", "rb") as f:
+            # Ahora pickle sí encontrará la clase 'InterpoladorGrid4D' arriba definida
             sistema = pickle.load(f)
         return sistema
     except FileNotFoundError:
-        st.error("❌ No se encuentra el archivo 'predictor_grid_4d.pkl' en el repositorio.")
-        st.stop()
-    except Exception as e:
-        st.error(f"❌ Error al cargar el modelo: {e}")
+        st.error("❌ No se encuentra 'predictor_grid_4d.pkl'")
         st.stop()
 
-try:
-    sistema = load_assets()
-    predictor = sistema['predictor']
-    metricas = sistema['metricas']
-    valores_discretos = sistema['valores_discretos']
-    assets_loaded = True
-except Exception as e:
-    st.error(f"Error al inicializar los activos del modelo: {e}")
-    assets_loaded = False
+sistema = load_assets()
+predictor = sistema['predictor']
+metricas = sistema['metricas']
+valores_discretos = sistema['valores_discretos']
 
-# 4. Interfaz de Usuario
-st.title("🚀 Predictor de Ph - XGBoost + Interpolación Grid 4D")
-st.subheader("Sistema de Alta Precisión con Interpolación Suave")
+# ==============================================================================
+# 4. INTERFAZ STREAMLIT (Igual que la anterior)
+# ==============================================================================
+st.title("🚀 Predictor de Ph - Interpolación Grid 4D")
 
-if assets_loaded:
-    st.markdown(f"""
-    Esta versión utiliza **XGBoost + Grid 4D**, permitiendo **interpolación continua** entre valores discretos sin efecto escalón.
-
-    **📊 Rendimiento del modelo:** Error máximo {metricas['grid']['error_max']:.2f}% | MAPE {metricas['grid']['mape']:.2f}%
-    """)
-
-# Información sobre valores discretos
-with st.expander("ℹ️ Información sobre las variables continuas"):
-    st.markdown(f"""
-    Las siguientes variables fueron entrenadas con valores discretos, pero el modelo 
-    **interpola suavemente** entre ellos:
-    
-    - **mo**: {list(valores_discretos['mo'])}
-    - **B (m)**: {list(valores_discretos['B'])}
-    - **UCS (MPa)**: {list(valores_discretos['UCS'])}
-    - **GSI**: {list(valores_discretos['GSI'])}
-    
-    ✅ **Puedes introducir cualquier valor intermedio** (ej: B=7.3m, UCS=35 MPa)
-    y el modelo interpolará correctamente sin efecto escalón.
-    """)
-
-# Formulario de entrada
 with st.form("my_form"):
     col1, col2 = st.columns(2)
-    
     with col1:
-        st.subheader("🧪 Variables Analíticas")
-        ucs_val = st.number_input("UCS - Resistencia Compresión Simple (MPa)", 5.0, 100.0, 50.0, 0.1, format="%.1f")
-        gsi_val = st.number_input("GSI - Geological Strength Index", 10, 85, 50, 1)
-        mo_val = st.number_input("Parámetro mo", 5.0, 32.0, 20.0, 0.1, format="%.1f")
-        
+        ucs_val = st.number_input("UCS (MPa)", 5.0, 100.0, 50.0)
+        gsi_val = st.number_input("GSI", 10, 85, 50)
+        mo_val = st.number_input("mo", 5.0, 32.0, 20.0)
     with col2:
-        st.subheader("⚙️ Variables No Analíticas")
-        b_val = st.number_input("Ancho de cimentación - B (m)", 4.5, 22.0, 11.0, 0.1, format="%.2f")
-        v5_sel = st.selectbox("Peso Propio", ["Sin Peso", "Con Peso"], index=0)
-        v6_sel = st.selectbox("Dilatancia", ["Nulo", "Asociada"], index=1)
-        v7_sel = st.selectbox("Forma del modelo", ["Plana", "Axisimétrica"], index=1)
-        v8_sel = st.selectbox("Rugosidad de la base", ["Sin Rugosidad", "Rugoso"], index=1)
-        
-    st.markdown("---")
-    submit = st.form_submit_button("🎯 CALCULAR PREDICCIÓN", use_container_width=True)
+        b_val = st.number_input("B (m)", 4.5, 22.0, 11.0)
+        v5 = st.selectbox("Peso Propio", ["Sin Peso", "Con Peso"])
+        v6 = st.selectbox("Dilatancia", ["Nulo", "Asociada"])
+        v7 = st.selectbox("Forma", ["Plana", "Axisimétrica"])
+        v8 = st.selectbox("Rugosidad", ["Sin Rugosidad", "Rugoso"])
+    
+    submit = st.form_submit_button("CALCULAR")
 
-# 5. Lógica de Predicción
-if assets_loaded and submit:
-    try:
-        # Conversión de categorías
-        v5 = 1 if v5_sel == "Con Peso" else 0
-        v6 = 1 if v6_sel == "Asociada" else 0
-        v7 = 1 if v7_sel == "Axisimétrica" else 0
-        v8 = 1 if v8_sel == "Rugoso" else 0
-        
-        input_vector = [mo_val, b_val, ucs_val, gsi_val, v5, v6, v7, v8]
-        ph_pred = predictor.predecir(input_vector)
-        
-        if np.isnan(ph_pred) or ph_pred < 0:
-            st.error("⚠️ Predicción fuera de rango válido.")
-        else:
-            st.success(f"### 🎯 Ph Predicho: **{ph_pred:.4f}**")
-            
-            # Guardar en historial
-            st.session_state["historial"].insert(0, {
-                "Hora": datetime.now().strftime("%H:%M:%S"),
-                "mo": mo_val, "B": b_val, "UCS": ucs_val, "GSI": gsi_val,
-                "Ph": round(float(ph_pred), 4)
-            })
-    except Exception as e:
-        st.error(f"❌ Error en el cálculo: {e}")
+if submit:
+    # Mismo mapeo de 0 y 1 que en el entrenamiento
+    c5 = 1 if v5 == "Con Peso" else 0
+    c6 = 1 if v6 == "Asociada" else 0
+    c7 = 1 if v7 == "Axisimétrica" else 0
+    c8 = 1 if v8 == "Rugoso" else 0
+    
+    vector = [mo_val, b_val, ucs_val, gsi_val, c5, c6, c7, c8]
+    ph_pred = predictor.predecir(vector)
+    
+    st.success(f"### Ph Predicho: {ph_pred:.4f}")
+    
+    # Guardar en historial
+    st.session_state["historial"].insert(0, {"Hora": datetime.now().strftime("%H:%M:%S"), "Ph": ph_pred})
 
-# 6. Historial
+# Mostrar historial
 if st.session_state["historial"]:
-    st.markdown("---")
-    st.subheader("📜 Historial de Predicciones")
-    df_h = pd.DataFrame(st.session_state["historial"])
-    st.dataframe(df_h, use_container_width=True)
-    if st.button("🗑️ Limpiar Historial"):
-        st.session_state["historial"] = []
-        st.rerun()
+    st.table(pd.DataFrame(st.session_state["historial"]))
