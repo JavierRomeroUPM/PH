@@ -3,55 +3,104 @@ import pandas as pd
 import numpy as np
 import pickle
 import os
-from datetime import datetime # IMPORTANTE: Verificar que esté aquí
+from datetime import datetime
 from scipy.interpolate import RegularGridInterpolator
 
 # ==============================================================================
-# 1. LA CLASE DEBE IR PRIMERO (Antes de cargar el pickle)
+# 1. CONFIGURACIÓN Y CARGA DE ACTIVOS (BIT-PERFECT)
 # ==============================================================================
-class InterpoladorGrid4D:
-    def __init__(self, modelo_base, nodos, ref_vals, interp_original):
-        self.model = modelo_base
-        self.nodos = nodos
-        self.ref_vals = ref_vals
-        self.interp = interp_original
+st.set_page_config(page_title="Simulador Ph Bit-Perfect", layout="wide")
 
-    def predecir(self, vec_8d):
-        coincide_con_grid = (
-            vec_8d[4] == self.ref_vals['Peso Propio'] and
-            vec_8d[5] == self.ref_vals['Dilatancia'] and
-            vec_8d[6] == self.ref_vals['Forma'] and
-            vec_8d[7] == self.ref_vals['Rugosidad']
-        )
-        if coincide_con_grid:
-            p_log = self.interp([vec_8d[0], vec_8d[1], vec_8d[2], vec_8d[3]])[0]
-            return np.expm1(p_log)
-        else:
-            p_log = self.model.predict(np.array(vec_8d).reshape(1, -1))[0]
-            return np.expm1(p_log)
+if "historial" not in st.session_state:
+    st.session_state["historial"] = []
 
-# ==============================================================================
-# 2. CARGA DE DATOS (Usando nombres exactos del archivo generado)
-# ==============================================================================
 @st.cache_resource
-def load_all_assets():
-    # CAMBIA ESTO al nombre real de tu archivo .pkl
-    nombre_pkl = "modelo_hibrido_bit_perfect.pkl" 
+def load_assets():
+    # USAMOS TU ARCHIVO REAL
+    nombre_modelo = "modelo_hibrido_bit_perfect.pkl"
     
-    if not os.path.exists(nombre_pkl):
-        st.error(f"Archivo {nombre_pkl} no encontrado.")
+    if not os.path.exists(nombre_modelo):
+        st.error(f"❌ No se encuentra el archivo: {nombre_modelo}")
         st.stop()
         
-    with open(nombre_pkl, "rb") as f:
-        data = pickle.load(f)
-    
-    # Reconstrucción del objeto usando la clase definida arriba
-    return InterpoladorGrid4D(
-        modelo_base=data['gbm_base'],
-        nodos=data['nodos'],
-        ref_vals=data['ref_vals'],
-        interp_original=data['interp']
-    )
+    with open(nombre_modelo, "rb") as f:
+        return pickle.load(f)
 
-predictor = load_all_assets()
-# ... resto del código (Interfaz, historial, etc.)
+# Cargamos los datos del pkl
+assets = load_assets()
+interp_sistema = assets['interp']   # El interpolador lineal
+gbm_oraculo = assets['gbm_base']    # El GBM puro (8D)
+nodos_malla = assets['nodos']       # Valores discretos [5, 12, 50, etc]
+ref_vals = assets['ref_vals']       # Peso propio, Rugosidad, etc.
+
+# ==============================================================================
+# 2. LÓGICA DE PREDICCIÓN (GBM EN NODOS / LINEAL EN RESTO)
+# ==============================================================================
+def calcular_ph(mo, b, ucs, gsi, pp, dil, form, rug):
+    # Comprobamos si las variables secundarias coinciden con la referencia del Grid
+    es_escenario_ref = (pp == ref_vals['Peso Propio'] and 
+                        dil == ref_vals['Dilatancia'] and 
+                        form == ref_vals['Forma'] and 
+                        rug == ref_vals['Rugosidad'])
+    
+    if es_escenario_ref:
+        # MODO SUAVE: Usamos el interpolador lineal 4D
+        # Este devuelve el valor exacto del GBM en los nodos y línea en el resto
+        log_ph = interp_sistema([mo, b, ucs, gsi])[0]
+        return np.expm1(log_ph), "INTERPOLADO / NODO"
+    else:
+        # MODO ORÁCULO: Fuera del escenario base, usamos el GBM 8D directamente
+        vec_8d = np.array([[mo, b, ucs, gsi, pp, dil, form, rug]])
+        log_ph = gbm_oraculo.predict(vec_8d)[0]
+        return np.expm1(log_ph), "GBM PURO (8D)"
+
+# ==============================================================================
+# 3. INTERFAZ DE USUARIO
+# ==============================================================================
+st.title("🚀 Predictor Ph - Sistema Híbrido Bit-Perfect")
+st.markdown("Modelo de alta fidelidad: **GBM Puro** en nodos y **Interpolación Lineal** en transiciones.")
+
+with st.form("main_form"):
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🧪 Variables Analíticas")
+        ucs = st.number_input("UCS (MPa)", 5.0, 100.0, 50.0)
+        gsi = st.number_input("GSI", 10.0, 85.0, 50.0)
+        mo = st.number_input("Parámetro mo", 5.0, 32.0, 12.0)
+        
+    with col2:
+        st.subheader("⚙️ Variables de Escenario")
+        b = st.number_input("Ancho B (m)", 4.5, 22.0, 11.0)
+        v_pp = st.selectbox("Peso Propio", ["Sin Peso (0)", "Con Peso (1)"], index=1)
+        v_dil = st.selectbox("Dilatancia", ["Nula (0)", "Asociada (1)"], index=1)
+        v_for = st.selectbox("Forma", ["Plana (0)", "Axisimétrica (1)"], index=0)
+        v_rug = st.selectbox("Rugosidad", ["Liso (0)", "Rugoso (1)"], index=1)
+
+    submit = st.form_submit_button("🎯 CALCULAR PREDICCIÓN", use_container_width=True)
+
+if submit:
+    # Mapeo a números (0 y 1)
+    pp_val = 1 if "1" in v_pp else 0
+    dil_val = 1 if "1" in v_dil else 0
+    for_val = 1 if "1" in v_for else 0
+    rug_val = 1 if "1" in v_rug else 0
+    
+    ph_resultado, modo = calcular_ph(mo, b, ucs, gsi, pp_val, dil_val, for_val, rug_val)
+    
+    st.markdown("---")
+    st.success(f"### Ph Predicho: **{ph_resultado:.4f} MPa**")
+    st.info(f"**Modo de cálculo:** {modo}")
+
+    # Guardar en historial
+    st.session_state["historial"].insert(0, {
+        "Hora": datetime.now().strftime("%H:%M:%S"),
+        "UCS": ucs, "GSI": gsi, "mo": mo, "B": b, "Ph (MPa)": ph_resultado, "Modo": modo
+    })
+
+# ==============================================================================
+# 4. HISTORIAL
+# ==============================================================================
+if st.session_state["historial"]:
+    st.subheader("📜 Historial de Consultas")
+    st.dataframe(pd.DataFrame(st.session_state["historial"]), use_container_width=True)
