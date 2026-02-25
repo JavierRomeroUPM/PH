@@ -63,25 +63,25 @@ def predecir_suave(mo, b, ucs, gsi, pp, dil, form, rug):
     es_exacto = all(np.any(np.isclose(v, nodos_malla[k])) 
                    for v, k in zip([mo, b, ucs, gsi], ['mo', 'B', 'UCS', 'GSI']))
     
-    modo = "🎯 NODO (GBM)" if es_exacto else "🔄 INTERPOLADO (Suave)"
+    modo = "🎯 NODO (GBM)" if es_exacto else "🔄 INTERPOLADO"
     return np.expm1(log_ph), modo
 
 # ==============================================================================
 # 3. INTERFAZ DE USUARIO
 # ==============================================================================
-st.title("🚀 Predictor Ph - Metamodelo de Alta Fidelidad")
+st.title("🚀 Predictor de Ph de zapatas dsobre macizo rocoso")
 
 with st.form("main_form"):
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("🧪 Variables Analíticas")
+        st.subheader("🧪 Variables Numéricass")
         in_ucs = st.number_input("UCS (MPa)", 5.0, 100.0, 50.0, step=0.1)
         in_gsi = st.number_input("GSI", 10.0, 85.0, 85.0, step=1.0)
         in_mo = st.number_input("Parámetro m0", 5.0, 32.0, 20.0, step=0.1)
         in_b = st.number_input("Ancho B (m)", 4.5, 22.0, 11.0, step=0.1)
         
     with col2:
-        st.subheader("⚙️ Variables No Analíticas")
+        st.subheader("⚙️ Variables Categoricas")
         v_pp = st.selectbox("Peso Propio", ["Sin Peso", "Con Peso"], index=1)
         v_dil = st.selectbox("Dilatancia", ["No asociada", "Asociada"], index=1)
         v_for = st.selectbox("Forma", ["Plana", "Axisimétrica"], index=0)
