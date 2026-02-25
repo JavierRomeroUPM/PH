@@ -74,7 +74,7 @@ st.title("🚀 Predictor de Ph de zapatas dsobre macizo rocoso")
 with st.form("main_form"):
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("🧪 Variables Numéricass")
+        st.subheader("🧪 Variables Numéricas")
         in_ucs = st.number_input("UCS (MPa)", 5.0, 100.0, 50.0, step=0.1)
         in_gsi = st.number_input("GSI", 10.0, 85.0, 85.0, step=1.0)
         in_mo = st.number_input("Parámetro m0", 5.0, 32.0, 20.0, step=0.1)
