@@ -69,7 +69,7 @@ def predecir_suave(mo, b, ucs, gsi, pp, dil, form, rug):
 # ==============================================================================
 # 3. INTERFAZ DE USUARIO
 # ==============================================================================
-st.title("🚀 Predictor de Ph de zapatas dsobre macizo rocoso")
+st.title("Predictor de la presión de hundimiento de zapatas sobre macizo rocoso")
 
 with st.form("main_form"):
     col1, col2 = st.columns(2)
