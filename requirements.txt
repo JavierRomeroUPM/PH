@@ -1,7 +1,6 @@
-streamlit
+catboost
+scikit-learn
 pandas
 numpy
-scikit-learn
-xgboost
 scipy
-joblib
+openpyxl
